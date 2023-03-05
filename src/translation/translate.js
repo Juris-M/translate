@@ -100,6 +100,7 @@ Zotero.Translate.Sandbox = {
 					"creators",
 					"tags",
 					"notes",
+					"multi",
 					"relations",
 					// Is this still needed?
 					"seeAlso"
