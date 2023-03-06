@@ -105,7 +105,7 @@ Zotero.Translate.Sandbox = {
 					// Is this still needed?
 					"seeAlso"
 				];
-				
+
 				// Create a new object here, so that we strip the "complete" property
 				var newItem = {};
 				var oldItem = item;
@@ -1611,7 +1611,6 @@ Zotero.Translate.Base.prototype = {
 				attachmentsWithProgress.push(attachment);
 			}
 		}
-		
 		return this._itemSaver.saveItems(items.slice(), attachmentCallback.bind(this),
 			function(newItems) {
 				this._runHandler("itemsDone", newItems);
@@ -1823,6 +1822,7 @@ Zotero.Translate.Base.prototype = {
 				"for(var i=0, n=createArrays.length; i<n; i++) {"+
 					"this[createArrays[i]] = [];"+
 				"}"+
+				"this.multi = {main:{},_keys:{}}"+
 		"};";
 		
 		if(this instanceof Zotero.Translate.Export || this instanceof Zotero.Translate.Import) {
