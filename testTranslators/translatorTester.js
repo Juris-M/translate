@@ -280,7 +280,7 @@ Zotero_TranslatorTester._sanitizeItem = function(item, testItem, keepValidFields
 	var fieldID, itemFieldID,
 		typeID = Zotero.ItemTypes.getID(item.itemType);
 	const skipFields = ["note", "notes", "itemID", "attachments", "tags", "seeAlso",
-						"itemType", "complete", "creators"];
+						"itemType", "complete", "creators", "multi"];
 	for(var field in item) {
 		if(skipFields.indexOf(field) !== -1) {
 			continue;
