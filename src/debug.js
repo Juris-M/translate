@@ -25,7 +25,7 @@
 
 Zotero.Debug = new function () {
 	var _console, _store, _level, _lastTime, _output = [];
-	var _slowTime = false;
+	var _slowTime = 1e3;
 	var _consoleViewer = false;
 	
 	/**
@@ -63,9 +63,10 @@ Zotero.Debug = new function () {
 		_lastTime = d;
 		var slowPrefix = "";
 		var slowSuffix = "";
-		if (_slowTime && delta > _slowTime) {
-			slowPrefix = "\x1b[31;40m";
-			slowSuffix = "\x1b[0m";
+		var isSlow = _slowTime && delta > _slowTime
+		if (isSlow) {
+			slowPrefix = "%c";
+			slowSuffix = "%c";
 		}
 		
 		delta = ("" + delta).padStart(7, "0");
@@ -84,7 +85,12 @@ Zotero.Debug = new function () {
 		}
 		
 		var output = '(' + level + ')' + deltaStr + ': ' + message;
-		console.log(output+"\n");
+		if (isSlow) {
+			console.log(output, "color: red;", "");
+		}
+		else {
+			console.log(output);
+		}
 		
 		if (_store) {
 			if (Math.random() < 1/1000) {
@@ -162,24 +168,27 @@ Zotero.Debug = new function () {
 	this.stackToString = function (stack, lines) {
 		if (!lines) lines = 5;
 		var str = '';
-		while(stack && lines--) {
+		while (stack && lines--) {
 			str += '\n  ' + (stack.name || '') + '@' + stack.filename
 				+ ':' + stack.lineNumber;
 			stack = stack.caller;
 		}
-		return this.filterStack(str).substr(1);
+		return this.filterStack(str).substring(1);
 	};
-	
-	
+
+
 	/**
-	 * Strip Bluebird lines from a stack trace
+	 * This method previously filtered Bluebird stack frames out of a stack
+	 * trace. Bluebird has been removed, so this function now only exists for
+	 * compatibility (and in case filtering is necessary in the future).
 	 *
-	 * @param {String} stack
+	 * @param {string} stack An error stack trace string
+	 * @returns {string} The same stack trace
 	 */
 	this.filterStack = function (stack) {
-		return stack.split(/\n/).filter(line => line.indexOf('zotero/bluebird') == -1).join('\n');
-	}
-}
+		return stack;
+	};
+};
 
 if (typeof process === 'object' && process + '' === '[object process]'){
 	module.exports = Zotero.Debug;

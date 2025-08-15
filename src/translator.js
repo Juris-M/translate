@@ -32,10 +32,10 @@ var TRANSLATOR_REQUIRED_PROPERTIES = ["translatorID", "translatorType", "label",
 // Properties that are preserved if present
 var TRANSLATOR_OPTIONAL_PROPERTIES = ["targetAll", "browserSupport", "minVersion", "maxVersion",
 	"inRepository", "configOptions", "displayOptions",
-	"hiddenPrefs", "itemType"];
+	"hiddenPrefs", "itemType", "proxy"];
 // Properties that are passed from background to inject page in connector
 var TRANSLATOR_PASSING_PROPERTIES = TRANSLATOR_REQUIRED_PROPERTIES
-	.concat(["targetAll", "browserSupport", "code", "runMode", "itemType", "inRepository"]);
+	.concat(["targetAll", "browserSupport", "code", "runMode", "itemType", "inRepository", "proxy"]);
 
 var TRANSLATOR_CACHING_PROPERTIES = TRANSLATOR_REQUIRED_PROPERTIES
 	.concat(["browserSupport", "targetAll"]);
@@ -87,8 +87,13 @@ Zotero.Translator.prototype.init = function(info) {
 		}
 	}
 	for (let property of TRANSLATOR_OPTIONAL_PROPERTIES) {
-		if(info[property] !== undefined) {
-			this[property] = info[property];
+		if (info[property] !== undefined) {
+			if (property === 'proxy' && info.proxy) {
+				this.proxy = new Zotero.Proxy(info.proxy);
+			}
+			else {
+				this[property] = info[property];
+			}
 		}
 	}
 
@@ -144,9 +149,13 @@ Zotero.Translator.prototype.init = function(info) {
  */
 Zotero.Translator.prototype.serialize = function(properties) {
 	var info = {};
-	for(var i in properties) {
-		var property = properties[i];
-		info[property] = this[property];
+	for (let key of properties) {
+		if (key === 'proxy' && this[key]?.toJSON) {
+			info[key] = this[key].toJSON();
+		}
+		else {
+			info[key] = this[key];
+		}
 	}
 	return info;
 }
@@ -161,7 +170,7 @@ Zotero.Translator.prototype.serialize = function(properties) {
  */
 Zotero.Translator.prototype.logError = function(message, type, line, lineNumber, colNumber) {
 	if (Zotero.isFx && this.path) {
-		Components.utils.import("resource://gre/modules/FileUtils.jsm");
+		const { FileUtils } = ChromeUtils.importESModule("resource://gre/modules/FileUtils.sys.mjs");
 		var file = new FileUtils.File(this.path);
 		var ios = Components.classes["@mozilla.org/network/io-service;1"].
 		getService(Components.interfaces.nsIIOService);
