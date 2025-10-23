@@ -106,12 +106,11 @@ Zotero.Translate.Sandbox = {
 					"seeAlso"
 				];
 				
-				// Create a new object here, so that we strip the "complete" property
+				// Create a new object here, normalizing properties with object values
 				var newItem = {};
-				var oldItem = item;
-				for(var i in item) {
+				for (let i in item) {
 					var val = item[i];
-					if(i === "complete" || (!val && val !== 0)) continue;
+					if(!val && val !== 0) continue;
 					
 					var type = typeof val;
 					var isObject = type === "object" || type === "xml" || type === "function",
@@ -335,7 +334,14 @@ Zotero.Translate.Sandbox = {
 						try {
 							item = item.wrappedJSObject ? item.wrappedJSObject : item;
 							if(arg1 == "itemDone") {
-								item.complete = translate._sandboxZotero.Item.prototype.complete;
+								Object.defineProperty(
+									item,
+									"complete",
+									{
+										value: translate._sandboxZotero.Item.prototype.complete,
+										enumerable: false,
+									}
+								);
 							}
 							arg2(obj, item);
 						} catch(e) {
@@ -575,14 +581,6 @@ Zotero.Translate.Sandbox = {
 					return;
 				}
 				
-				// store library catalog if this item was captured from a website, and
-				// libraryCatalog is truly undefined (not false or "")
-				if(item.repository !== undefined) {
-					Zotero.debug("Translate: 'repository' field is now 'libraryCatalog'; please fix your code", 2);
-					item.libraryCatalog = item.repository;
-					delete item.repository;
-				}
-				
 				// automatically set library catalog
 				if(item.libraryCatalog === undefined && item.itemType != "webpage") {
 					item.libraryCatalog = translate.translator[0].label;
@@ -612,28 +610,56 @@ Zotero.Translate.Sandbox = {
 				}
 				
 				// create short title
-				if(item.shortTitle === undefined && Zotero.Utilities.fieldIsValidForType("shortTitle", item.itemType)) {		
+				if (item.shortTitle === undefined && Zotero.Utilities.fieldIsValidForType("shortTitle", item.itemType)) {
 					// only set if changes have been made
 					var setShortTitle = false;
 					var title = item.title;
 					
 					// shorten to before first colon
 					var index = title.indexOf(":");
-					if(index !== -1) {
+					if (index !== -1) {
 						title = title.substr(0, index);
 						setShortTitle = true;
 					}
 					// shorten to after first question mark
 					index = title.indexOf("?");
-					if(index !== -1) {
+					if (index !== -1) {
 						index++;
-						if(index != title.length) {
+						if (index != title.length) {
 							title = title.substr(0, index);
 							setShortTitle = true;
 						}
 					}
 					
-					if(setShortTitle) item.shortTitle = title;
+					if (setShortTitle) {
+						// Close unclosed tags in the short title
+
+						const tagPairs = {
+							'<i>': '</i>',
+							'<b>': '</b>',
+							'<sub>': '</sub>',
+							'<sup>': '</sup>',
+							'<span style="font-variant:small-caps;">': '</span>',
+							'<span class="nocase">': '</span>'
+						};
+
+						let stack = [];
+
+						for (let token of title.split(/(<[^>]+>)/)) {
+							if (tagPairs.hasOwnProperty(token)) {
+								stack.push(tagPairs[token]);
+							}
+							else if (token === stack[stack.length - 1]) {
+								stack.pop();
+							}
+						}
+
+						while (stack.length) {
+							title += stack.pop();
+						}
+
+						item.shortTitle = title;
+					}
 				}
 				
 				/* Clean up ISBNs
@@ -711,6 +737,10 @@ Zotero.Translate.Sandbox = {
 			if(translate._currentState != "detect") {
 				Zotero.debug("Translate: monitorDOMChanges can only be called during the 'detect' stage");
 				return;
+			}
+			
+			if (!target || !target.nodeName) {
+				throw new Error('Translate.monitorDOMChanges(): target is not a valid Node');
 			}
 
 			var window = translate.document.defaultView
@@ -1094,7 +1124,6 @@ Zotero.Translate.Base.prototype = {
 		this._getAllTranslators = getAllTranslators;
 		this._potentialTranslators = [];
 		this._foundTranslators = [];
-
 		if(checkSetTranslator) {
 			// setTranslator must be called beforehand if checkSetTranslator is set
 			if( !this.translator || !this.translator[0] ) {
@@ -1114,7 +1143,7 @@ Zotero.Translate.Base.prototype = {
 				if(t) promises.push(t);
 			}
 			if(!promises.length) return Zotero.Promise.reject(new Error("getTranslators: no valid translators were set"));
-			potentialTranslators = Zotero.Promise.all(promises);
+			potentialTranslators = Zotero.Promise.all(promises).then(val => [val]);
 		} else {
 			potentialTranslators = this._getTranslatorsGetPotentialTranslators();
 		}
@@ -1336,6 +1365,7 @@ Zotero.Translate.Base.prototype = {
 				let fn = this._sandboxManager.sandbox["do" + this._entryFunctionSuffix];
 				if (!fn) {
 					this.complete(false, new Error(`Translator has no do${this._entryFunctionSuffix} function`));
+					return;
 				}
 
 				let maybePromise = Function.prototype.apply.call(
@@ -1708,6 +1738,7 @@ Zotero.Translate.Base.prototype = {
 		let fn = this._sandboxManager.sandbox["detect" + this._entryFunctionSuffix];
 		if (!fn) {
 			this.complete(false, new Error(`Translator has no detect${this._entryFunctionSuffix} function`));
+			return null;
 		}
 
 		var maybePromise = Function.prototype.apply.call(
@@ -1721,6 +1752,16 @@ Zotero.Translate.Base.prototype = {
 		if (returnValue !== undefined) this._returnValue = returnValue;
 		this.decrementAsyncProcesses("Zotero.Translate#getTranslators");
 		
+		// If the translator started an async process in detect* (like loading another translator),
+		// wait for it in the promise we return
+		if (this._runningAsyncProcesses) {
+			return new Promise((resolve, reject) => {
+				this.setHandler('translators', () => resolve(this._returnValue));
+				this.setHandler('error', (_, err) => reject(err));
+			});
+		}
+		
+		// Otherwise, immediately return what detect* returned
 		return returnValue;
 	},
 	
@@ -1779,34 +1820,34 @@ Zotero.Translate.Base.prototype = {
 		var parse = function(code) {
 			Zotero.debug("Translate: Parsing code for " + translator.label + " "
 				+ "(" + translator.translatorID + ", " + translator.lastUpdated + ")", 4);
-			try {
-				this._sandboxManager.eval(
-					"var exports = {}, ZOTERO_TRANSLATOR_INFO = " + code,
-					[
-						"detect" + this._entryFunctionSuffix,
-						"do" + this._entryFunctionSuffix,
-						"exports",
-						"ZOTERO_TRANSLATOR_INFO"
-					],
-					(translator.file ? translator.file.path : translator.label)
-				);
-			}
-			catch (e) {
-				this.complete(false, e);
-				return;
-			}
+			// This might throw but it's better than catching and calling complete(false) here
+			// since then other execution paths are not aware of this failing and continue running
+			// at least in Import translation detection, causing weird race conditions.
+			// The code that calls this function (which is really only code in this file)
+			// should expect a throw and call complete(false) after catching.
+			this._sandboxManager.eval(
+				"var exports = {}, ZOTERO_TRANSLATOR_INFO = " + code,
+				[
+					"detect" + this._entryFunctionSuffix,
+					"do" + this._entryFunctionSuffix,
+					"exports",
+					"ZOTERO_TRANSLATOR_INFO"
+				],
+				(translator.file ? translator.file.path : translator.label)
+			);
+			
 			this._translatorInfo = this._sandboxManager.sandbox.ZOTERO_TRANSLATOR_INFO;
 		}.bind(this);
 		
 		if (this.noWait) {
-			let codePromise = Zotero.Translators.getCodeForTranslator(translator);
+			let codePromise = this._translatorProvider.getCodeForTranslator(translator);
 			if (!codePromise.isResolved()) {
 				throw new Error("Code promise is not resolved in noWait mode");
 			}
 			parse(codePromise.value());
 		}
 		else {
-			return Zotero.Translators.getCodeForTranslator(translator).then(parse);
+			return this._translatorProvider.getCodeForTranslator(translator).then(parse);
 		}
 	}),
 	
@@ -1816,29 +1857,17 @@ Zotero.Translate.Base.prototype = {
 	"_generateSandbox":function() {
 		Zotero.debug("Translate: Binding sandbox to "+(typeof this._sandboxLocation == "object" ? this._sandboxLocation.document.location : this._sandboxLocation), 4);
 		this._sandboxManager = new Zotero.Translate.SandboxManager(this._sandboxLocation);
-		const createArrays = "['creators', 'notes', 'tags', 'seeAlso', 'attachments']";
-		var src = "";
-		src += "Zotero.Item = function (itemType) {"+
-				"var createArrays = "+createArrays+";"+
-				"this.itemType = itemType;"+
-				"for(var i=0, n=createArrays.length; i<n; i++) {"+
-					"this[createArrays[i]] = [];"+
-				"}"+
-		"};";
 		
-		if(this instanceof Zotero.Translate.Export || this instanceof Zotero.Translate.Import) {
-			src += "Zotero.Collection = function () {};"+
-			"Zotero.Collection.prototype.complete = function() { return Zotero._collectionDone(this); };";
-		}
-		
-		src += "Zotero.Item.prototype.complete = function() { return Zotero._itemDone(this); }";
-
-		this._sandboxManager.eval(src);
 		this._sandboxManager.importObject(this.Sandbox, this);
 		this._sandboxManager.importObject({"Utilities":new Zotero.Utilities.Translate(this)});
 
 		this._sandboxZotero = this._sandboxManager.sandbox.Zotero;
 
+		this._sandboxZotero.Item = this._makeSandboxItem();
+		if (this instanceof Zotero.Translate.Export || this instanceof Zotero.Translate.Import) {
+			this._sandboxZotero.Collection = this._makeSandboxCollection();
+		}
+		
 		this._sandboxZotero.Utilities.HTTP = this._sandboxZotero.Utilities;
 		
 		this._sandboxZotero.isBookmarklet = Zotero.isBookmarklet || false;
@@ -1851,7 +1880,6 @@ Zotero.Translate.Base.prototype = {
 		// create shortcuts
 		this._sandboxManager.sandbox.Z = this._sandboxZotero;
 		this._sandboxManager.sandbox.ZU = this._sandboxZotero.Utilities;
-		this._transferItem = this._sandboxZotero._transferItem;
 		
 		// Add helper functions
 		if (this.type == 'web' || this.type == 'search') {
@@ -1922,6 +1950,60 @@ Zotero.Translate.Base.prototype = {
 			? docOrElem.querySelectorAll(selector).item(index)
 			: docOrElem.querySelector(selector);
 		return (elem ? elem.innerText : "").trim();
+	},
+
+	_makeSandboxItem() {
+		let sandboxZotero = this._sandboxZotero;
+		if (!sandboxZotero) {
+			throw new Error('Sandbox must be initialized');
+		}
+		
+		return class {
+			itemType;
+
+			creators = [];
+
+			notes = [];
+
+			tags = [];
+
+			seeAlso = [];
+
+			attachments = [];
+
+			constructor(itemType) {
+				this.itemType = itemType;
+			}
+
+			setExtra(field, value) {
+				let lines = String(this.extra || '').split('\n');
+				let existingIndex = lines.findIndex(line => line.startsWith(field + ': '));
+				if (existingIndex !== -1) {
+					lines[existingIndex] = `${field}: ${value}`;
+				}
+				else {
+					lines.push(`${field}: ${value}`);
+				}
+				this.extra = lines.join('\n');
+			}
+
+			complete() {
+				return sandboxZotero._itemDone(this);
+			}
+		};
+	},
+	
+	_makeSandboxCollection() {
+		let sandboxZotero = this._sandboxZotero;
+		if (!sandboxZotero) {
+			throw new Error('Sandbox must be initialized');
+		}
+		
+		return class {
+			complete() {
+				return sandboxZotero._collectionDone(this);
+			}
+		};
 	},
 	
 	/**
